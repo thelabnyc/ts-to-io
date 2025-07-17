@@ -1,17 +1,9 @@
 {
-  "compilerOptions": {
-    "moduleResolution": "node",
-    "target": "es5",
-    "module": "commonjs",
-    "noImplicitAny": true,
-    "removeComments": true,
-    "preserveConstEnums": true,
-    "declaration": true,
-    "outDir": "build",
-    "sourceMap": true,
-    "strict": true,
-    "esModuleInterop": true
-  },
-  "include": ["src"],
-  "exclude": ["node_modules"]
+    "extends": "@tsconfig/node22/tsconfig.json",
+    "compilerOptions": {
+        "declaration": true,
+        "outDir": "dist",
+        "sourceMap": true
+    },
+    "include": ["src"]
 }

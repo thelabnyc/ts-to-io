@@ -1,5 +1,5 @@
 #!/usr/bin/env node
 
-var tsToIo = require("./build/index.js");
+import * as tsToIo from "./dist/index.js";
 
 console.log(tsToIo.getValidatorsFromFileNames());

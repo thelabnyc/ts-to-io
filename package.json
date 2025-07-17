@@ -1,34 +1,41 @@
 {
-  "name": "ts-to-io",
+  "name": "@thelabnyc/ts-to-io",
   "version": "0.3.1",
-  "license": "MIT",
-  "author": "Juuso Mikkonen",
+  "license": "ISC",
+  "author": "thelab <thelabdev@thelab.co>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/juusaw/ts-to-io.git"
+    "url": "https://gitlab.com/thelabnyc/ts-to-io.git"
   },
-  "main": "./build/index.js",
-  "types": "./build/index.d.ts",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
-    "build/**/*",
+    "dist/**/*",
     "cli.js"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc --noEmit false",
+    "lint": "eslint ./src",
     "start": "./cli.js",
-    "test": "jest"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui"
   },
   "bin": {
     "ts-to-io": "./cli.js"
   },
   "dependencies": {
     "commander": "3.0.2",
-    "typescript": "4.0.3"
+    "typescript": "5.8.3"
   },
   "devDependencies": {
-    "@types/jest": "26.0.14",
-    "@types/node": "^12.7.5",
-    "jest": "26.5.2",
-    "ts-jest": "26.4.1"
+    "@thelabnyc/standards": "^0.4.7",
+    "@tsconfig/node22": "^22.0.2",
+    "@types/node": "^24.0.14",
+    "@typescript-eslint/parser": "^8.37.0",
+    "@vitest/ui": "^3.2.4",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "vitest": "^3.2.4"
   }
 }
