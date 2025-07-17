@@ -12,24 +12,33 @@ include:
     inputs:
       image: registry.gitlab.com/thelabnyc/python:3.13.810-node20@sha256:021ab06d834d8a96fda03797b7b536cc77cfc31c86194a749a86a61c44936061
 
+.base_job: &base_job
+  image: node:22
+  before_script:
+    - npm ci
+  variables:
+    NODE_ENV: development
+
 test:
+  <<: *base_job
   stage: test
   image: "${IMAGE}"
   script:
-    - npm ci
     - npm run lint
     - npm run build
+    - npm run test
   parallel:
     matrix:
       - IMAGE: node:20
       - IMAGE: node:22
+
 
 .release_job: &release_job
   rules:
     - if: $CI_COMMIT_TAG && $CI_COMMIT_REF_PROTECTED == "true"
   stage: release
   needs:
-    - lint
+    - test
 
 release:pkg-npm:
   <<: *base_job
