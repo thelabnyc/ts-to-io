@@ -1,5 +1,7 @@
 import { Command } from "commander";
 
+const VERSION = "0.3.1";
+
 /**
  * Creates and configures the Commander.js program for the ts-to-io CLI.
  * Sets up command line options and arguments for the tool.
@@ -8,7 +10,7 @@ function createProgram(): Command {
     const program = new Command();
     program
         .name("ts-to-io")
-        .version("0.2.1")
+        .version(VERSION)
         .option(
             "--follow-imports",
             "output codecs for types declared in imported files",
