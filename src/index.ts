@@ -24,18 +24,25 @@ import {
     isVoid,
 } from "./type.js";
 
-const getOptimizedStringLiteralUnion = (type: ts.UnionType) => {
+/**
+ * Generates optimized io-ts codec for string literal unions using keyof.
+ */
+const getOptimizedStringLiteralUnion = (type: ts.UnionType): string => {
     const unionTypes = type.types as ts.StringLiteralType[];
     return `t.keyof({${unionTypes.map((t: ts.StringLiteralType) => `"${t.value}": null`).join(", ")}})`;
 };
 
 // Forward declare functions to allow mutual recursion
+/**
+ * Processes a TypeScript object type and generates the corresponding io-ts codec.
+ * Handles required and optional properties by creating intersections or partials as needed.
+ */
 function processObjectType(
     checker: ts.TypeChecker,
     processedDeclarations: Set<string>,
     availableSymbols: Set<string>,
 ) {
-    return (type: ts.ObjectType) => {
+    return (type: ts.ObjectType): string => {
         const properties = checker.getPropertiesOfType(type);
         const requiredProperties = properties.filter(
             (p) =>
@@ -65,16 +72,23 @@ function processObjectType(
     };
 }
 
+/**
+ * Processes a TypeScript property symbol and generates the corresponding io-ts property definition.
+ */
 function processProperty(
     checker: ts.TypeChecker,
     processedDeclarations: Set<string>,
     availableSymbols: Set<string>,
 ) {
-    return (s: ts.Symbol) => {
+    return (s: ts.Symbol): string => {
         return `${s.name}: ${processType(checker, processedDeclarations, availableSymbols)(checker.getTypeOfSymbolAtLocation(s, s.valueDeclaration!))}`;
     };
 }
 
+/**
+ * Processes a TypeScript type and generates the corresponding io-ts codec string.
+ * Handles various type kinds including primitives, unions, intersections, arrays, and objects.
+ */
 function processType(
     checker: ts.TypeChecker,
     processedDeclarations: Set<string>,
@@ -154,6 +168,10 @@ function processType(
     };
 }
 
+/**
+ * Handles a TypeScript declaration node and generates the corresponding io-ts codec declaration.
+ * Supports type aliases, interfaces, and variable statements.
+ */
 function handleDeclaration(
     node:
         | ts.TypeAliasDeclaration
@@ -162,7 +180,7 @@ function handleDeclaration(
     checker: ts.TypeChecker,
     processedDeclarations: Set<string>,
     availableSymbols: Set<string>,
-) {
+): string {
     let symbol: ts.Symbol | undefined;
     let type: ts.Type;
     try {
@@ -204,7 +222,14 @@ function handleDeclaration(
 }
 
 // Collect type references from a node
-const collectTypeReferences = (node: ts.Node, dependencies: Set<string>) => {
+/**
+ * Recursively collects type references from a TypeScript AST node.
+ * Used to build dependency graphs for proper ordering of type declarations.
+ */
+const collectTypeReferences = (
+    node: ts.Node,
+    dependencies: Set<string>,
+): void => {
     if (ts.isTypeReferenceNode(node)) {
         if (ts.isIdentifier(node.typeName)) {
             dependencies.add(node.typeName.text);
@@ -216,6 +241,10 @@ const collectTypeReferences = (node: ts.Node, dependencies: Set<string>) => {
     );
 };
 
+/**
+ * Collects type declarations from TypeScript AST nodes based on configuration.
+ * Filters declarations based on import following settings.
+ */
 const collectDeclarations =
     (
         config: TsToIoConfig,
@@ -225,7 +254,7 @@ const collectDeclarations =
             | ts.VariableStatement
         >,
     ) =>
-    (node: ts.Node) => {
+    (node: ts.Node): void => {
         if (
             !config.followImports &&
             !config.fileNames.includes(node.getSourceFile().fileName)
@@ -244,6 +273,10 @@ const collectDeclarations =
     };
 
 // Topological sort for dependency ordering
+/**
+ * Performs topological sort on type declarations to ensure proper dependency ordering.
+ * Uses Kahn's algorithm to handle circular dependencies gracefully.
+ */
 const topologicalSort = (
     declarations: Array<
         ts.TypeAliasDeclaration | ts.InterfaceDeclaration | ts.VariableStatement
@@ -356,7 +389,10 @@ const topologicalSort = (
     return result;
 };
 
-const getImports = () => {
+/**
+ * Generates the io-ts import statement for the generated codec file.
+ */
+const getImports = (): string => {
     return `import * as t from "io-ts"`;
 };
 
@@ -364,10 +400,14 @@ const compilerOptions: ts.CompilerOptions = {
     strictNullChecks: true,
 };
 
+/**
+ * Generates io-ts validators from a TypeScript source string.
+ * Parses the source, analyzes types, and outputs corresponding io-ts codecs.
+ */
 export function getValidatorsFromString(
     source: string,
     config = { ...defaultConfig, fileNames: [DEFAULT_FILE_NAME] },
-) {
+): string {
     const defaultCompilerHostOptions = ts.createCompilerHost({});
 
     const compilerHostOptions = {
@@ -452,7 +492,11 @@ export function getValidatorsFromString(
     return result.join("\n\n");
 }
 
-export function getValidatorsFromFileNames() {
+/**
+ * Generates io-ts validators from TypeScript files specified in CLI arguments.
+ * Reads configuration from command line and processes the specified files.
+ */
+export function getValidatorsFromFileNames(): string {
     const config = getCliConfig();
     if (!config.fileNames.length) {
         return displayHelp();

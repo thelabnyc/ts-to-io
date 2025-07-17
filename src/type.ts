@@ -3,11 +3,17 @@ import * as ts from "typescript";
 
 import { extractFlags } from "./flags.js";
 
+/**
+ * Checks if a TypeScript type is an object type.
+ */
 export function isObjectType(type: ts.Type): type is ts.ObjectType {
     return extractFlags(type.flags).includes(ts.TypeFlags.Object);
 }
 
-export function isPrimitiveType(type: ts.Type) {
+/**
+ * Checks if a TypeScript type is a primitive type (string, number, boolean, null, or undefined).
+ */
+export function isPrimitiveType(type: ts.Type): boolean {
     return extractFlags(type.flags).some((flag) =>
         [
             ts.TypeFlags.String,
@@ -19,49 +25,82 @@ export function isPrimitiveType(type: ts.Type) {
     );
 }
 
-export function isAnyOrUnknown(type: ts.Type) {
+/**
+ * Checks if a TypeScript type is any or unknown.
+ */
+export function isAnyOrUnknown(type: ts.Type): boolean {
     return extractFlags(type.flags).some((f) =>
         [ts.TypeFlags.Any, ts.TypeFlags.Unknown].includes(f),
     );
 }
 
-export function isVoid(type: ts.Type) {
+/**
+ * Checks if a TypeScript type is void.
+ */
+export function isVoid(type: ts.Type): boolean {
     return extractFlags(type.flags).includes(ts.TypeFlags.Void);
 }
 
+/**
+ * Checks if a TypeScript type is a tuple type.
+ */
 export function isTupleType(type: ts.Type): type is ts.TupleType {
     const target = (type as ts.TupleTypeReference).target;
     return target && typeof target.hasRestElement === "boolean";
 }
 
-export function isRecordType(type: ts.Type) {
-    return (
+/**
+ * Checks if a TypeScript type is a Record type.
+ */
+export function isRecordType(type: ts.Type): boolean {
+    return !!(
         type.aliasSymbol &&
         type.aliasSymbol.escapedName === ("Record" as ts.__String)
     );
 }
 
-export function isStringIndexedObjectType(type: ts.Type) {
+/**
+ * Checks if a TypeScript type has a string index signature.
+ */
+export function isStringIndexedObjectType(type: ts.Type): ts.Type | undefined {
     return type.getStringIndexType();
 }
 
-export function isNumberIndexedType(type: ts.Type) {
+/**
+ * Checks if a TypeScript type has a number index signature.
+ */
+export function isNumberIndexedType(type: ts.Type): ts.Type | undefined {
     return type.getNumberIndexType();
 }
 
-export function isArrayType(type: ts.Type) {
+/**
+ * Checks if a TypeScript type is an Array type.
+ */
+export function isArrayType(type: ts.Type): boolean {
     return type.symbol && type.symbol.escapedName === ("Array" as ts.__String);
 }
 
-export function isFunctionType(type: ts.Type) {
+/**
+ * Checks if a TypeScript type is a function type.
+ */
+export function isFunctionType(type: ts.Type): boolean {
     return !!type.getCallSignatures().length;
 }
 
-export function isBasicObjectType(type: ts.Type, checker: ts.TypeChecker) {
+/**
+ * Checks if a TypeScript type is a basic object type.
+ */
+export function isBasicObjectType(
+    type: ts.Type,
+    checker: ts.TypeChecker,
+): boolean {
     return checker.typeToString(type) === "object";
 }
 
-export function isLiteralType(type: ts.Type) {
+/**
+ * Checks if a TypeScript type is a literal type (string, number, or boolean literal).
+ */
+export function isLiteralType(type: ts.Type): boolean {
     return extractFlags(type.flags).some((f) =>
         [
             ts.TypeFlags.StringLiteral,
