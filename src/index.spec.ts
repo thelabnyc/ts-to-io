@@ -129,6 +129,72 @@ describe("Generate io-ts validators", () => {
       'const foobar = t.union([t.null, t.literal("foo"), t.literal("bar")])'
     );
   });
+
+  test("should use references instead of inlining interface types", () => {
+    const input = `
+      interface Person {
+        name: string;
+      }
+
+      interface PersonGroup {
+        name: string;
+        members: Person[];
+      }
+    `;
+    
+    const expected = `const Person = t.type({name: t.string})
+
+const PersonGroup = t.type({name: t.string, members: t.array(Person)})`;
+    
+    expect(getValidatorsFromString(input, testConfig)).toBe(expected);
+  });
+
+  test("should use references for out-of-order interface declarations", () => {
+    const input = `
+      interface PersonGroup {
+        name: string;
+        members: Person[];
+      }
+
+      interface Person {
+        name: string;
+      }
+    `;
+    
+    const expected = `const Person = t.type({name: t.string})
+
+const PersonGroup = t.type({name: t.string, members: t.array(Person)})`;
+    
+    expect(getValidatorsFromString(input, testConfig)).toBe(expected);
+  });
+
+  test("should handle type alias dependencies correctly", () => {
+    const input = `
+      interface Person {
+        name: Name;
+      }
+
+      interface FirstName {
+        first_name: string;
+      }
+
+      interface LastName {
+        last_name: string;
+      }
+
+      type Name = FirstName & LastName;
+    `;
+    
+    const expected = `const FirstName = t.type({first_name: t.string})
+
+const LastName = t.type({last_name: t.string})
+
+const Name = t.intersection([FirstName, LastName])
+
+const Person = t.type({name: Name})`;
+    
+    expect(getValidatorsFromString(input, testConfig)).toBe(expected);
+  });
 });
 
 describe("Configuration", () => {
