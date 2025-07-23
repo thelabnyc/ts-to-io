@@ -13,7 +13,7 @@ include:
       image: registry.gitlab.com/thelabnyc/python:3.13.810-node20@sha256:021ab06d834d8a96fda03797b7b536cc77cfc31c86194a749a86a61c44936061
 
 .base_job: &base_job
-  image: node:22@sha256:079b6a683dc47a87673a6159c9e9b22b0687d04533087cf144c96fac8c26ecd3
+  image: node:22@sha256:e515259afd26f60db74957c62203c93d45760f2ba864d94accfa2edfc1ac17cf
   before_script:
     - npm ci
   variables:
