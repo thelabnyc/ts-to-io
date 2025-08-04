@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "commander": "^14.0.0",
-    "typescript": "5.8.3"
+    "typescript": "5.9.2"
   },
   "devDependencies": {
     "@thelabnyc/standards": "^0.4.7",
