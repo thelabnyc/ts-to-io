@@ -1,3 +1,9 @@
+## v0.4.1 (2025-09-03)
+
+### Fix
+
+- **deps**: update dependency typescript to v5.9.2
+
 ## v0.4.0 (2025-07-17)
 
 ### Fix
