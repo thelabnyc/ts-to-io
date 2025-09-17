@@ -1,6 +1,6 @@
 import { Command } from "commander";
 
-const VERSION = "0.4.1";
+const VERSION = "0.4.2";
 
 /**
  * Creates and configures the Commander.js program for the ts-to-io CLI.
