@@ -5,7 +5,7 @@
   "author": "thelab <thelabdev@thelab.co>",
   "repository": {
     "type": "git",
-    "url": "https://gitlab.com/thelabnyc/ts-to-io.git"
+    "url": "git+https://gitlab.com/thelabnyc/ts-to-io.git"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -23,7 +23,7 @@
     "test:ui": "vitest --ui"
   },
   "bin": {
-    "ts-to-io": "./cli.js"
+    "ts-to-io": "cli.js"
   },
   "dependencies": {
     "commander": "^14.0.0",
