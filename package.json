@@ -30,7 +30,7 @@
     "typescript": "5.9.3"
   },
   "devDependencies": {
-    "@thelabnyc/standards": "^0.4.7",
+    "@thelabnyc/standards": "^0.5.0",
     "@tsconfig/node22": "^22.0.2",
     "@types/node": "^24.0.14",
     "@typescript-eslint/parser": "^8.37.0",
