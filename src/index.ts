@@ -429,7 +429,7 @@ export function getValidatorsFromString(
                     filename,
                     languageVersion,
                     ...(restArgs as [
-                        onError?: (message: string) => void | undefined,
+                        onError?: (message: string) => void,
                         shouldCreateNewSourceFile?: boolean | undefined,
                     ]),
                 );
