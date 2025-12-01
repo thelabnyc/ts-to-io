@@ -34,8 +34,8 @@
     "@tsconfig/node22": "^22.0.2",
     "@types/node": "^24.0.14",
     "@typescript-eslint/parser": "^8.37.0",
-    "@vitest/ui": "^3.2.4",
+    "@vitest/ui": "^4.0.0",
     "eslint-import-resolver-typescript": "^4.4.4",
-    "vitest": "^3.2.4"
+    "vitest": "^4.0.0"
   }
 }
