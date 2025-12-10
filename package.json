@@ -37,5 +37,25 @@
     "@vitest/ui": "^4.0.0",
     "eslint-import-resolver-typescript": "^4.4.4",
     "vitest": "^4.0.0"
+  },
+  "peerDependencies": {
+    "io-ts": "^2.2.0",
+    "fp-ts": "^2.16.0",
+    "io-ts-types": "^0.5.19",
+    "newtype-ts": "^0.3.4"
+  },
+  "peerDependenciesMeta": {
+    "io-ts": {
+      "optional": true
+    },
+    "fp-ts": {
+      "optional": true
+    },
+    "io-ts-types": {
+      "optional": true
+    },
+    "newtype-ts": {
+      "optional": true
+    }
   }
 }

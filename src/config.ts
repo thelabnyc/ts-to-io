@@ -16,6 +16,11 @@ function createProgram(): Command {
             "output codecs for types declared in imported files",
         )
         .option("--no-include-header", "omit io-ts import from the output")
+        .option(
+            "--newtype-mode <mode>",
+            "newtype generation mode: none, all",
+            "none",
+        )
         .arguments("<files>");
     return program;
 }
@@ -49,10 +54,12 @@ export interface TsToIoConfig {
     followImports: boolean;
     includeHeader: boolean;
     fileNames: string[];
+    newtypeMode: "none" | "all";
 }
 
 export const defaultConfig: TsToIoConfig = {
     followImports: false,
     includeHeader: true,
     fileNames: [],
+    newtypeMode: "none",
 };

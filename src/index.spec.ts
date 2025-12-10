@@ -240,3 +240,115 @@ describe("Internals", () => {
         expect(extractFlags(67108864)).toEqual([67108864]);
     });
 });
+
+describe("Newtype mode", () => {
+    const newtypeConfig = {
+        ...testConfig,
+        newtypeMode: "all" as const,
+    };
+
+    test("generates newtype for string primitive alias", () => {
+        const input = `export type Latitude = string;`;
+        const expected = `export interface Latitude extends Newtype<{ readonly Latitude: unique symbol }, string> {}
+export const Latitude = fromNewtype<Latitude>(t.string)
+export const isoLatitude = iso<Latitude>()`;
+        expect(getValidatorsFromString(input, newtypeConfig)).toBe(expected);
+    });
+
+    test("generates newtype for number primitive alias", () => {
+        const input = `export type Meters = number;`;
+        const expected = `export interface Meters extends Newtype<{ readonly Meters: unique symbol }, number> {}
+export const Meters = fromNewtype<Meters>(t.number)
+export const isoMeters = iso<Meters>()`;
+        expect(getValidatorsFromString(input, newtypeConfig)).toBe(expected);
+    });
+
+    test("generates newtype for boolean primitive alias", () => {
+        const input = `export type IsActive = boolean;`;
+        const expected = `export interface IsActive extends Newtype<{ readonly IsActive: unique symbol }, boolean> {}
+export const IsActive = fromNewtype<IsActive>(t.boolean)
+export const isoIsActive = iso<IsActive>()`;
+        expect(getValidatorsFromString(input, newtypeConfig)).toBe(expected);
+    });
+
+    test("preserves type reference in interface property", () => {
+        const input = `
+export type Latitude = string;
+export interface Point {
+    lat: Latitude;
+}
+`;
+        const result = getValidatorsFromString(input, newtypeConfig);
+        expect(result).toContain("lat: Latitude");
+    });
+
+    test("handles union with newtype", () => {
+        const input = `
+export type Latitude = string;
+export interface Point {
+    lat: Latitude | null;
+}
+`;
+        const result = getValidatorsFromString(input, newtypeConfig);
+        expect(result).toContain("t.union([Latitude, t.null])");
+    });
+
+    test("generates multiple newtypes", () => {
+        const input = `
+export type Latitude = string;
+export type Longitude = string;
+`;
+        const result = getValidatorsFromString(input, newtypeConfig);
+        expect(result).toContain("interface Latitude");
+        expect(result).toContain("interface Longitude");
+        expect(result).toContain("fromNewtype<Latitude>(t.string)");
+        expect(result).toContain("fromNewtype<Longitude>(t.string)");
+    });
+
+    test("includes newtype imports when newtypeMode is all", () => {
+        const input = `export type Latitude = string;`;
+        const result = getValidatorsFromString(input, {
+            ...newtypeConfig,
+            includeHeader: true,
+        });
+        expect(result).toContain('import * as t from "io-ts"');
+        expect(result).toContain(
+            'import { fromNewtype } from "io-ts-types/lib/fromNewtype"',
+        );
+        expect(result).toContain('import { Newtype, iso } from "newtype-ts"');
+    });
+
+    test("does not include newtype imports when no newtypes are generated", () => {
+        const input = `export interface Point { x: number; y: number; }`;
+        const result = getValidatorsFromString(input, {
+            ...newtypeConfig,
+            includeHeader: true,
+        });
+        expect(result).toContain('import * as t from "io-ts"');
+        expect(result).not.toContain("fromNewtype");
+        expect(result).not.toContain("newtype-ts");
+    });
+
+    test("does not convert complex type aliases to newtypes", () => {
+        const input = `export type StringOrNumber = string | number;`;
+        const result = getValidatorsFromString(input, newtypeConfig);
+        expect(result).not.toContain("Newtype");
+        expect(result).toContain("t.union([t.string, t.number])");
+    });
+
+    test("backward compatibility - newtypeMode none", () => {
+        const input = `
+export type Latitude = string;
+export interface Point {
+    lat: Latitude;
+}
+`;
+        const noneConfig = {
+            ...testConfig,
+            newtypeMode: "none" as const,
+        };
+        const result = getValidatorsFromString(input, noneConfig);
+        expect(result).not.toContain("Newtype");
+        expect(result).toContain("const Latitude = t.string");
+    });
+});
