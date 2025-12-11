@@ -21,6 +21,10 @@ function createProgram(): Command {
             "newtype generation mode: none, all",
             "none",
         )
+        .option(
+            "--no-deduplicate-newtypes",
+            "disable deduplication of numbered type variants (e.g., Foo1, Foo2 -> Foo)",
+        )
         .arguments("<files>");
     return program;
 }
@@ -55,6 +59,7 @@ export interface TsToIoConfig {
     includeHeader: boolean;
     fileNames: string[];
     newtypeMode: "none" | "all";
+    deduplicateNewtypes: boolean;
 }
 
 export const defaultConfig: TsToIoConfig = {
@@ -62,4 +67,5 @@ export const defaultConfig: TsToIoConfig = {
     includeHeader: true,
     fileNames: [],
     newtypeMode: "none",
+    deduplicateNewtypes: true,
 };

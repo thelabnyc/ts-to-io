@@ -24,6 +24,7 @@ import {
     isStringIndexedObjectType,
     isTupleType,
     isVoid,
+    parseNumberedTypeName,
 } from "./type.js";
 
 /**
@@ -33,6 +34,71 @@ interface NewtypeInfo {
     name: string; // e.g., "Latitude"
     interfaceName: string; // e.g., "Latitude" (same as name, uses declaration merging)
     primitiveType: "string" | "number" | "boolean";
+}
+
+/**
+ * Information about type aliases that should be deduplicated.
+ * Maps numbered variants (e.g., "Foo1", "Foo2") to their base name (e.g., "Foo").
+ */
+interface DeduplicationInfo {
+    /** Map from numbered name to base name (e.g., "NominalsResourceUrl1" -> "NominalsResourceUrl") */
+    variantToBase: Map<string, string>;
+    /** Set of base names that have variants to deduplicate */
+    baseNamesWithVariants: Set<string>;
+}
+
+/**
+ * Analyzes newtype aliases to find numbered variants that can be deduplicated.
+ * Only deduplicates when:
+ * 1. The base type (without number suffix) exists
+ * 2. All variants resolve to the same primitive type as the base
+ */
+function analyzeForDeduplication(
+    newtypeAliases: Map<string, NewtypeInfo>,
+): DeduplicationInfo {
+    const variantToBase = new Map<string, string>();
+    const baseNamesWithVariants = new Set<string>();
+
+    // Group potential variants by base name
+    const potentialGroups = new Map<
+        string,
+        Array<{ name: string; primitiveType: string }>
+    >();
+
+    for (const [name, info] of newtypeAliases) {
+        const parsed = parseNumberedTypeName(name);
+        if (parsed) {
+            // This is a potential numbered variant
+            const group = potentialGroups.get(parsed.baseName) || [];
+            group.push({ name, primitiveType: info.primitiveType });
+            potentialGroups.set(parsed.baseName, group);
+        }
+    }
+
+    // Check each potential group
+    for (const [baseName, variants] of potentialGroups) {
+        // Check if base name exists as a newtype
+        const baseInfo = newtypeAliases.get(baseName);
+        if (!baseInfo) {
+            continue; // No base type, don't deduplicate
+        }
+
+        // Check all variants have the same primitive type as base
+        const allSameType = variants.every(
+            (v) => v.primitiveType === baseInfo.primitiveType,
+        );
+        if (!allSameType) {
+            continue; // Different types, don't deduplicate
+        }
+
+        // This group is safe to deduplicate
+        baseNamesWithVariants.add(baseName);
+        for (const variant of variants) {
+            variantToBase.set(variant.name, baseName);
+        }
+    }
+
+    return { variantToBase, baseNamesWithVariants };
 }
 
 /**
@@ -66,6 +132,7 @@ function processObjectType(
     processedDeclarations: Set<string>,
     availableSymbols: Set<string>,
     newtypeAliases: Map<string, NewtypeInfo>,
+    deduplicationInfo: DeduplicationInfo | null,
 ) {
     return (type: ts.ObjectType): string => {
         const properties = checker.getPropertiesOfType(type);
@@ -85,15 +152,16 @@ function processObjectType(
                         processedDeclarations,
                         availableSymbols,
                         newtypeAliases,
+                        deduplicationInfo,
                     ),
                 )
                 .join(
                     ", ",
-                )}}), t.partial({${optionalProperties.map(processProperty(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(", ")}})])`;
+                )}}), t.partial({${optionalProperties.map(processProperty(checker, processedDeclarations, availableSymbols, newtypeAliases, deduplicationInfo)).join(", ")}})])`;
         } else if (optionalProperties.length === 0) {
-            return `t.type({${requiredProperties.map(processProperty(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(", ")}})`;
+            return `t.type({${requiredProperties.map(processProperty(checker, processedDeclarations, availableSymbols, newtypeAliases, deduplicationInfo)).join(", ")}})`;
         } else {
-            return `t.partial({${optionalProperties.map(processProperty(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(", ")}})`;
+            return `t.partial({${optionalProperties.map(processProperty(checker, processedDeclarations, availableSymbols, newtypeAliases, deduplicationInfo)).join(", ")}})`;
         }
     };
 }
@@ -107,6 +175,7 @@ function processProperty(
     processedDeclarations: Set<string>,
     availableSymbols: Set<string>,
     newtypeAliases: Map<string, NewtypeInfo>,
+    deduplicationInfo: DeduplicationInfo | null,
 ) {
     return (s: ts.Symbol): string => {
         const type = checker.getTypeOfSymbolAtLocation(s, s.valueDeclaration!);
@@ -116,7 +185,11 @@ function processProperty(
         const typeNode = valueDecl?.type;
 
         // Simple type reference (e.g., `lat: Latitude`)
-        const refName = getTypeReferenceName(typeNode);
+        let refName = getTypeReferenceName(typeNode);
+        // Apply deduplication mapping
+        if (refName && deduplicationInfo?.variantToBase.has(refName)) {
+            refName = deduplicationInfo.variantToBase.get(refName)!;
+        }
         if (refName && availableSymbols.has(refName)) {
             return `${s.name}: ${refName}`;
         }
@@ -125,7 +198,15 @@ function processProperty(
         // Process each AST union member to preserve type reference names
         if (type.isUnion() && typeNode && ts.isUnionTypeNode(typeNode)) {
             const unionCodecs = typeNode.types.map((memberNode) => {
-                const memberRefName = getTypeReferenceName(memberNode);
+                let memberRefName = getTypeReferenceName(memberNode);
+                // Apply deduplication mapping
+                if (
+                    memberRefName &&
+                    deduplicationInfo?.variantToBase.has(memberRefName)
+                ) {
+                    memberRefName =
+                        deduplicationInfo.variantToBase.get(memberRefName)!;
+                }
                 if (memberRefName && availableSymbols.has(memberRefName)) {
                     return memberRefName;
                 }
@@ -136,13 +217,14 @@ function processProperty(
                     processedDeclarations,
                     availableSymbols,
                     newtypeAliases,
+                    deduplicationInfo,
                 )(memberType);
             });
             return `${s.name}: t.union([${unionCodecs.join(", ")}])`;
         }
 
         // Fall back to normal type processing
-        return `${s.name}: ${processType(checker, processedDeclarations, availableSymbols, newtypeAliases)(type)}`;
+        return `${s.name}: ${processType(checker, processedDeclarations, availableSymbols, newtypeAliases, deduplicationInfo)(type)}`;
     };
 }
 
@@ -155,24 +237,19 @@ function processType(
     processedDeclarations: Set<string>,
     availableSymbols: Set<string>,
     newtypeAliases: Map<string, NewtypeInfo>,
+    deduplicationInfo: DeduplicationInfo | null,
 ) {
     return (type: ts.Type): string => {
         // Check if this is a reference to an available type alias or interface first
-        if (
-            type.symbol &&
-            type.symbol.name &&
-            availableSymbols.has(type.symbol.name)
-        ) {
-            return type.symbol.name;
+        let symbolName = type.symbol?.name || type.aliasSymbol?.name;
+
+        // Apply deduplication mapping
+        if (symbolName && deduplicationInfo?.variantToBase.has(symbolName)) {
+            symbolName = deduplicationInfo.variantToBase.get(symbolName)!;
         }
 
-        // Check if this is a type alias by looking at the aliasSymbol
-        if (
-            type.aliasSymbol &&
-            type.aliasSymbol.name &&
-            availableSymbols.has(type.aliasSymbol.name)
-        ) {
-            return type.aliasSymbol.name;
+        if (symbolName && availableSymbols.has(symbolName)) {
+            return symbolName;
         }
 
         if (isLiteralType(type)) {
@@ -188,30 +265,31 @@ function processType(
             if (isStringLiteralUnion) {
                 return getOptimizedStringLiteralUnion(type);
             }
-            return `t.union([${type.types.map(processType(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(", ")}])`;
+            return `t.union([${type.types.map(processType(checker, processedDeclarations, availableSymbols, newtypeAliases, deduplicationInfo)).join(", ")}])`;
         } else if (type.isIntersection()) {
-            return `t.intersection([${type.types.map(processType(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(", ")}])`;
+            return `t.intersection([${type.types.map(processType(checker, processedDeclarations, availableSymbols, newtypeAliases, deduplicationInfo)).join(", ")}])`;
         } else if (isTupleType(type)) {
             if (type.hasRestElement) {
                 console.warn(
                     "io-ts default validators do not support rest parameters in a tuple",
                 );
             }
-            return `t.tuple([${type.typeArguments?.map(processType(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(",")}])`;
+            return `t.tuple([${type.typeArguments?.map(processType(checker, processedDeclarations, availableSymbols, newtypeAliases, deduplicationInfo)).join(",")}])`;
         } else if (isArrayType(type)) {
-            return `t.array(${processType(checker, processedDeclarations, availableSymbols, newtypeAliases)(type.getNumberIndexType()!)})`;
+            return `t.array(${processType(checker, processedDeclarations, availableSymbols, newtypeAliases, deduplicationInfo)(type.getNumberIndexType()!)})`;
         } else if (isRecordType(type)) {
             const [key, value] = type.aliasTypeArguments!;
-            return `t.record(${processType(checker, processedDeclarations, availableSymbols, newtypeAliases)(key)}, ${processType(
+            return `t.record(${processType(checker, processedDeclarations, availableSymbols, newtypeAliases, deduplicationInfo)(key)}, ${processType(
                 checker,
                 processedDeclarations,
                 availableSymbols,
                 newtypeAliases,
+                deduplicationInfo,
             )(value)})`;
         } else if (isStringIndexedObjectType(type)) {
-            return `t.record(t.string, ${processType(checker, processedDeclarations, availableSymbols, newtypeAliases)(type.getStringIndexType()!)})`;
+            return `t.record(t.string, ${processType(checker, processedDeclarations, availableSymbols, newtypeAliases, deduplicationInfo)(type.getStringIndexType()!)})`;
         } else if (isNumberIndexedType(type)) {
-            return `t.record(t.number, ${processType(checker, processedDeclarations, availableSymbols, newtypeAliases)(type.getNumberIndexType()!)})`;
+            return `t.record(t.number, ${processType(checker, processedDeclarations, availableSymbols, newtypeAliases, deduplicationInfo)(type.getNumberIndexType()!)})`;
         } else if (isFunctionType(type)) {
             return `t.Function`;
         } else if (isObjectType(type)) {
@@ -220,6 +298,7 @@ function processType(
                 processedDeclarations,
                 availableSymbols,
                 newtypeAliases,
+                deduplicationInfo,
             )(type);
         } else if (isVoid(type)) {
             return "t.void";
@@ -245,6 +324,7 @@ function handleDeclaration(
     processedDeclarations: Set<string>,
     availableSymbols: Set<string>,
     newtypeAliases: Map<string, NewtypeInfo>,
+    deduplicationInfo: DeduplicationInfo | null,
 ): string {
     let symbol: ts.Symbol | undefined;
     let type: ts.Type;
@@ -260,6 +340,12 @@ function handleDeclaration(
         } else {
             symbol = checker.getSymbolAtLocation(node.name);
             type = checker.getTypeAtLocation(node);
+        }
+
+        // Skip deduplicated variants - they will use the base type
+        if (symbol?.name && deduplicationInfo?.variantToBase.has(symbol.name)) {
+            processedDeclarations.add(symbol.name);
+            return ""; // Return empty string for deduplicated variants
         }
 
         // Check if this is a newtype alias
@@ -283,6 +369,7 @@ function handleDeclaration(
             processedDeclarations,
             availableSymbolsForRef,
             newtypeAliases,
+            deduplicationInfo,
         )(type);
 
         // Add the symbol name to the processed declarations after processing
@@ -575,6 +662,20 @@ export function getValidatorsFromString(
         }
     });
 
+    // Apply deduplication if enabled
+    let deduplicationInfo: DeduplicationInfo | null = null;
+    if (
+        effectiveConfig.deduplicateNewtypes &&
+        effectiveConfig.newtypeMode === "all"
+    ) {
+        deduplicationInfo = analyzeForDeduplication(newtypeAliases);
+
+        // Remove numbered variants from newtypeAliases - they will use base type
+        for (const variantName of deduplicationInfo.variantToBase.keys()) {
+            newtypeAliases.delete(variantName);
+        }
+    }
+
     const result = effectiveConfig.includeHeader
         ? [getImports(newtypeAliases)]
         : [];
@@ -589,15 +690,18 @@ export function getValidatorsFromString(
     // Process declarations in dependency order
     const processedDeclarations = new Set<string>();
     sortedDeclarations.forEach((node) => {
-        result.push(
-            handleDeclaration(
-                node,
-                checker,
-                processedDeclarations,
-                availableSymbols,
-                newtypeAliases,
-            ),
+        const output = handleDeclaration(
+            node,
+            checker,
+            processedDeclarations,
+            availableSymbols,
+            newtypeAliases,
+            deduplicationInfo,
         );
+        // Filter out empty strings from deduplicated variants
+        if (output) {
+            result.push(output);
+        }
     });
 
     return result.join("\n\n");
@@ -660,6 +764,17 @@ export function getValidatorsFromFileNames(): string {
         }
     });
 
+    // Apply deduplication if enabled
+    let deduplicationInfo: DeduplicationInfo | null = null;
+    if (config.deduplicateNewtypes && config.newtypeMode === "all") {
+        deduplicationInfo = analyzeForDeduplication(newtypeAliases);
+
+        // Remove numbered variants from newtypeAliases - they will use base type
+        for (const variantName of deduplicationInfo.variantToBase.keys()) {
+            newtypeAliases.delete(variantName);
+        }
+    }
+
     const result = config.includeHeader ? [getImports(newtypeAliases)] : [];
 
     // Sort declarations in dependency order
@@ -672,15 +787,18 @@ export function getValidatorsFromFileNames(): string {
     // Process declarations in dependency order
     const processedDeclarations = new Set<string>();
     sortedDeclarations.forEach((node) => {
-        result.push(
-            handleDeclaration(
-                node,
-                checker,
-                processedDeclarations,
-                availableSymbols,
-                newtypeAliases,
-            ),
+        const output = handleDeclaration(
+            node,
+            checker,
+            processedDeclarations,
+            availableSymbols,
+            newtypeAliases,
+            deduplicationInfo,
         );
+        // Filter out empty strings from deduplicated variants
+        if (output) {
+            result.push(output);
+        }
     });
 
     return result.join("\n\n");

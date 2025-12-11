@@ -352,3 +352,130 @@ export interface Point {
         expect(result).toContain("const Latitude = t.string");
     });
 });
+
+describe("Newtype deduplication", () => {
+    const dedupeConfig = {
+        ...testConfig,
+        newtypeMode: "all" as const,
+        deduplicateNewtypes: true,
+    };
+
+    test("deduplicates numbered variants to base type", () => {
+        const input = `
+export type NominalsResourceUrl = string;
+export type NominalsResourceUrl1 = string;
+export type NominalsResourceUrl2 = string;
+
+export interface Resource1 {
+    url: NominalsResourceUrl1;
+}
+
+export interface Resource2 {
+    url: NominalsResourceUrl2;
+}
+`;
+        const result = getValidatorsFromString(input, dedupeConfig);
+
+        // Should only have ONE newtype interface
+        expect(
+            (
+                result.match(
+                    /interface NominalsResourceUrl extends Newtype/g,
+                ) || []
+            ).length,
+        ).toBe(1);
+        expect(result).not.toContain("NominalsResourceUrl1");
+        expect(result).not.toContain("NominalsResourceUrl2");
+
+        // All references should use base type
+        expect(result).toContain("url: NominalsResourceUrl");
+    });
+
+    test("does not deduplicate when base type missing", () => {
+        const input = `
+export type Foo1 = string;
+export type Foo2 = string;
+`;
+        const result = getValidatorsFromString(input, dedupeConfig);
+
+        // Both should exist since there's no base "Foo"
+        expect(result).toContain("interface Foo1");
+        expect(result).toContain("interface Foo2");
+    });
+
+    test("does not deduplicate when primitive types differ", () => {
+        const input = `
+export type TypeId = string;
+export type TypeId1 = number;
+`;
+        const result = getValidatorsFromString(input, dedupeConfig);
+
+        // Both should exist since they have different primitive types
+        expect(result).toContain("interface TypeId extends Newtype");
+        expect(result).toContain("interface TypeId1 extends Newtype");
+    });
+
+    test("handles legitimate numbered types without deduplicating", () => {
+        // Types like "Email2Factor" are legitimate, not numbered variants
+        const input = `
+export type Email2Factor = string;
+`;
+        const result = getValidatorsFromString(input, dedupeConfig);
+
+        // Should exist as-is (no base "Email" to deduplicate to)
+        expect(result).toContain("interface Email2Factor");
+    });
+
+    test("deduplication disabled when flag is false", () => {
+        const input = `
+export type NominalsResourceUrl = string;
+export type NominalsResourceUrl1 = string;
+`;
+        const noDedupe = {
+            ...dedupeConfig,
+            deduplicateNewtypes: false,
+        };
+        const result = getValidatorsFromString(input, noDedupe);
+
+        // Both should exist
+        expect(result).toContain(
+            "interface NominalsResourceUrl extends Newtype",
+        );
+        expect(result).toContain(
+            "interface NominalsResourceUrl1 extends Newtype",
+        );
+    });
+
+    test("handles union with deduplicated newtype", () => {
+        const input = `
+export type NominalsResourceUrl = string;
+export type NominalsResourceUrl1 = string;
+export interface Resource {
+    url: NominalsResourceUrl1 | null;
+}
+`;
+        const result = getValidatorsFromString(input, dedupeConfig);
+
+        // Should reference the base type in the union
+        expect(result).toContain("t.union([NominalsResourceUrl, t.null])");
+        expect(result).not.toContain("NominalsResourceUrl1");
+    });
+
+    test("handles multiple deduplication groups", () => {
+        const input = `
+export type TypeA = string;
+export type TypeA1 = string;
+export type TypeB = number;
+export type TypeB1 = number;
+export type TypeB2 = number;
+`;
+        const result = getValidatorsFromString(input, dedupeConfig);
+
+        // Should only have base types
+        expect(result).toContain("interface TypeA extends Newtype");
+        expect(result).toContain("interface TypeB extends Newtype");
+        expect(result).not.toContain("TypeA1");
+        expect(result).not.toContain("TypeB1");
+        expect(result).not.toContain("TypeB2");
+    });
+});

@@ -144,3 +144,28 @@ export function getTypeReferenceName(
 
     return undefined;
 }
+
+/**
+ * Pattern for detecting numbered variants of a base type name.
+ * Matches type names that end with digits (e.g., "NominalsResourceUrl1", "Foo123").
+ */
+const NUMBERED_VARIANT_PATTERN = /^(.+?)(\d+)$/;
+
+/**
+ * Extracts the base name and number from a type name if it ends with digits.
+ * Returns null if the name doesn't match the numbered variant pattern.
+ *
+ * Examples:
+ *   "NominalsResourceUrl1" -> { baseName: "NominalsResourceUrl", number: 1 }
+ *   "NominalsResourceUrl" -> null
+ *   "Foo123" -> { baseName: "Foo", number: 123 }
+ */
+export function parseNumberedTypeName(
+    name: string,
+): { baseName: string; number: number } | null {
+    const match = name.match(NUMBERED_VARIANT_PATTERN);
+    if (match) {
+        return { baseName: match[1], number: parseInt(match[2], 10) };
+    }
+    return null;
+}
