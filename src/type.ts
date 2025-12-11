@@ -109,3 +109,38 @@ export function isLiteralType(type: ts.Type): boolean {
         ].includes(f),
     );
 }
+
+/**
+ * Checks if a type alias declaration resolves to a primitive type.
+ * Returns the primitive type name if so, otherwise undefined.
+ */
+export function getPrimitiveAliasType(
+    node: ts.TypeAliasDeclaration,
+    checker: ts.TypeChecker,
+): "string" | "number" | "boolean" | undefined {
+    const type = checker.getTypeAtLocation(node);
+
+    if (type.flags & ts.TypeFlags.String) return "string";
+    if (type.flags & ts.TypeFlags.Number) return "number";
+    if (type.flags & ts.TypeFlags.Boolean) return "boolean";
+
+    return undefined;
+}
+
+/**
+ * Gets the type reference name from an AST node if it's a type reference.
+ */
+export function getTypeReferenceName(
+    typeNode: ts.TypeNode | undefined,
+): string | undefined {
+    if (!typeNode) return undefined;
+
+    if (ts.isTypeReferenceNode(typeNode)) {
+        const typeName = typeNode.typeName;
+        if (ts.isIdentifier(typeName)) {
+            return typeName.text;
+        }
+    }
+
+    return undefined;
+}

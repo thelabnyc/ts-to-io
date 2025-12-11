@@ -10,6 +10,8 @@ import {
 } from "./config.js";
 import { extractFlags } from "./flags.js";
 import {
+    getPrimitiveAliasType,
+    getTypeReferenceName,
     isAnyOrUnknown,
     isArrayType,
     isBasicObjectType,
@@ -25,12 +27,34 @@ import {
 } from "./type.js";
 
 /**
+ * Information about a type alias that should become a newtype.
+ */
+interface NewtypeInfo {
+    name: string; // e.g., "Latitude"
+    interfaceName: string; // e.g., "Latitude" (same as name, uses declaration merging)
+    primitiveType: "string" | "number" | "boolean";
+}
+
+/**
  * Generates optimized io-ts codec for string literal unions using keyof.
  */
 const getOptimizedStringLiteralUnion = (type: ts.UnionType): string => {
     const unionTypes = type.types as ts.StringLiteralType[];
     return `t.keyof({${unionTypes.map((t: ts.StringLiteralType) => `"${t.value}": null`).join(", ")}})`;
 };
+
+/**
+ * Generates newtype definition code for a primitive type alias.
+ */
+function generateNewtypeDefinition(info: NewtypeInfo): string {
+    const { name, interfaceName, primitiveType } = info;
+    const iotsType =
+        primitiveType === "boolean" ? "t.boolean" : `t.${primitiveType}`;
+
+    return `export interface ${interfaceName} extends Newtype<{ readonly ${interfaceName}: unique symbol }, ${primitiveType}> {}
+export const ${name} = fromNewtype<${interfaceName}>(${iotsType})
+export const iso${name} = iso<${interfaceName}>()`;
+}
 
 // Forward declare functions to allow mutual recursion
 /**
@@ -41,6 +65,7 @@ function processObjectType(
     checker: ts.TypeChecker,
     processedDeclarations: Set<string>,
     availableSymbols: Set<string>,
+    newtypeAliases: Map<string, NewtypeInfo>,
 ) {
     return (type: ts.ObjectType): string => {
         const properties = checker.getPropertiesOfType(type);
@@ -59,29 +84,65 @@ function processObjectType(
                         checker,
                         processedDeclarations,
                         availableSymbols,
+                        newtypeAliases,
                     ),
                 )
                 .join(
                     ", ",
-                )}}), t.partial({${optionalProperties.map(processProperty(checker, processedDeclarations, availableSymbols)).join(", ")}})])`;
+                )}}), t.partial({${optionalProperties.map(processProperty(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(", ")}})])`;
         } else if (optionalProperties.length === 0) {
-            return `t.type({${requiredProperties.map(processProperty(checker, processedDeclarations, availableSymbols)).join(", ")}})`;
+            return `t.type({${requiredProperties.map(processProperty(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(", ")}})`;
         } else {
-            return `t.partial({${optionalProperties.map(processProperty(checker, processedDeclarations, availableSymbols)).join(", ")}})`;
+            return `t.partial({${optionalProperties.map(processProperty(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(", ")}})`;
         }
     };
 }
 
 /**
  * Processes a TypeScript property symbol and generates the corresponding io-ts property definition.
+ * Preserves type references to known type aliases including newtypes.
  */
 function processProperty(
     checker: ts.TypeChecker,
     processedDeclarations: Set<string>,
     availableSymbols: Set<string>,
+    newtypeAliases: Map<string, NewtypeInfo>,
 ) {
     return (s: ts.Symbol): string => {
-        return `${s.name}: ${processType(checker, processedDeclarations, availableSymbols)(checker.getTypeOfSymbolAtLocation(s, s.valueDeclaration!))}`;
+        const type = checker.getTypeOfSymbolAtLocation(s, s.valueDeclaration!);
+
+        // Check if the property's type node references a known type alias
+        const valueDecl = s.valueDeclaration as ts.PropertySignature;
+        const typeNode = valueDecl?.type;
+
+        // Simple type reference (e.g., `lat: Latitude`)
+        const refName = getTypeReferenceName(typeNode);
+        if (refName && availableSymbols.has(refName)) {
+            return `${s.name}: ${refName}`;
+        }
+
+        // Union type with type references (e.g., `lat: Latitude | null`)
+        // Process each AST union member to preserve type reference names
+        if (type.isUnion() && typeNode && ts.isUnionTypeNode(typeNode)) {
+            const unionCodecs = typeNode.types.map((memberNode) => {
+                const memberRefName = getTypeReferenceName(memberNode);
+                if (memberRefName && availableSymbols.has(memberRefName)) {
+                    return memberRefName;
+                }
+                // Get the type from the AST node instead of using index
+                const memberType = checker.getTypeAtLocation(memberNode);
+                return processType(
+                    checker,
+                    processedDeclarations,
+                    availableSymbols,
+                    newtypeAliases,
+                )(memberType);
+            });
+            return `${s.name}: t.union([${unionCodecs.join(", ")}])`;
+        }
+
+        // Fall back to normal type processing
+        return `${s.name}: ${processType(checker, processedDeclarations, availableSymbols, newtypeAliases)(type)}`;
     };
 }
 
@@ -93,6 +154,7 @@ function processType(
     checker: ts.TypeChecker,
     processedDeclarations: Set<string>,
     availableSymbols: Set<string>,
+    newtypeAliases: Map<string, NewtypeInfo>,
 ) {
     return (type: ts.Type): string => {
         // Check if this is a reference to an available type alias or interface first
@@ -126,29 +188,30 @@ function processType(
             if (isStringLiteralUnion) {
                 return getOptimizedStringLiteralUnion(type);
             }
-            return `t.union([${type.types.map(processType(checker, processedDeclarations, availableSymbols)).join(", ")}])`;
+            return `t.union([${type.types.map(processType(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(", ")}])`;
         } else if (type.isIntersection()) {
-            return `t.intersection([${type.types.map(processType(checker, processedDeclarations, availableSymbols)).join(", ")}])`;
+            return `t.intersection([${type.types.map(processType(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(", ")}])`;
         } else if (isTupleType(type)) {
             if (type.hasRestElement) {
                 console.warn(
                     "io-ts default validators do not support rest parameters in a tuple",
                 );
             }
-            return `t.tuple([${type.typeArguments?.map(processType(checker, processedDeclarations, availableSymbols)).join(",")}])`;
+            return `t.tuple([${type.typeArguments?.map(processType(checker, processedDeclarations, availableSymbols, newtypeAliases)).join(",")}])`;
         } else if (isArrayType(type)) {
-            return `t.array(${processType(checker, processedDeclarations, availableSymbols)(type.getNumberIndexType()!)})`;
+            return `t.array(${processType(checker, processedDeclarations, availableSymbols, newtypeAliases)(type.getNumberIndexType()!)})`;
         } else if (isRecordType(type)) {
             const [key, value] = type.aliasTypeArguments!;
-            return `t.record(${processType(checker, processedDeclarations, availableSymbols)(key)}, ${processType(
+            return `t.record(${processType(checker, processedDeclarations, availableSymbols, newtypeAliases)(key)}, ${processType(
                 checker,
                 processedDeclarations,
                 availableSymbols,
+                newtypeAliases,
             )(value)})`;
         } else if (isStringIndexedObjectType(type)) {
-            return `t.record(t.string, ${processType(checker, processedDeclarations, availableSymbols)(type.getStringIndexType()!)})`;
+            return `t.record(t.string, ${processType(checker, processedDeclarations, availableSymbols, newtypeAliases)(type.getStringIndexType()!)})`;
         } else if (isNumberIndexedType(type)) {
-            return `t.record(t.number, ${processType(checker, processedDeclarations, availableSymbols)(type.getNumberIndexType()!)})`;
+            return `t.record(t.number, ${processType(checker, processedDeclarations, availableSymbols, newtypeAliases)(type.getNumberIndexType()!)})`;
         } else if (isFunctionType(type)) {
             return `t.Function`;
         } else if (isObjectType(type)) {
@@ -156,6 +219,7 @@ function processType(
                 checker,
                 processedDeclarations,
                 availableSymbols,
+                newtypeAliases,
             )(type);
         } else if (isVoid(type)) {
             return "t.void";
@@ -180,6 +244,7 @@ function handleDeclaration(
     checker: ts.TypeChecker,
     processedDeclarations: Set<string>,
     availableSymbols: Set<string>,
+    newtypeAliases: Map<string, NewtypeInfo>,
 ): string {
     let symbol: ts.Symbol | undefined;
     let type: ts.Type;
@@ -197,6 +262,15 @@ function handleDeclaration(
             type = checker.getTypeAtLocation(node);
         }
 
+        // Check if this is a newtype alias
+        if (ts.isTypeAliasDeclaration(node) && symbol?.name) {
+            const newtypeInfo = newtypeAliases.get(symbol.name);
+            if (newtypeInfo) {
+                processedDeclarations.add(symbol.name);
+                return generateNewtypeDefinition(newtypeInfo);
+            }
+        }
+
         // Create a set of available symbols excluding the current one
         const availableSymbolsForRef = new Set(availableSymbols);
         if (symbol?.name) {
@@ -208,6 +282,7 @@ function handleDeclaration(
             checker,
             processedDeclarations,
             availableSymbolsForRef,
+            newtypeAliases,
         )(type);
 
         // Add the symbol name to the processed declarations after processing
@@ -391,9 +466,19 @@ const topologicalSort = (
 
 /**
  * Generates the io-ts import statement for the generated codec file.
+ * Includes newtype-ts imports when newtypes are used.
  */
-const getImports = (): string => {
-    return `import * as t from "io-ts"`;
+const getImports = (newtypeAliases: Map<string, NewtypeInfo>): string => {
+    const imports = ['import * as t from "io-ts"'];
+
+    if (newtypeAliases.size > 0) {
+        imports.push(
+            'import { fromNewtype } from "io-ts-types/lib/fromNewtype"',
+        );
+        imports.push('import { Newtype, iso } from "newtype-ts"');
+    }
+
+    return imports.join("\n");
 };
 
 const compilerOptions: ts.CompilerOptions = {
@@ -406,8 +491,14 @@ const compilerOptions: ts.CompilerOptions = {
  */
 export function getValidatorsFromString(
     source: string,
-    config = { ...defaultConfig, fileNames: [DEFAULT_FILE_NAME] },
+    config: Partial<TsToIoConfig> = {},
 ): string {
+    // Merge with defaults and ensure DEFAULT_FILE_NAME is always included for string processing
+    const effectiveConfig: TsToIoConfig = {
+        ...defaultConfig,
+        ...config,
+        fileNames: [DEFAULT_FILE_NAME],
+    };
     const defaultCompilerHostOptions = ts.createCompilerHost({});
 
     const compilerHostOptions = {
@@ -442,7 +533,6 @@ export function getValidatorsFromString(
         compilerHostOptions,
     );
     const checker = program.getTypeChecker();
-    const result = config.includeHeader ? [getImports()] : [];
 
     // Collect all declarations
     const declarations: Array<
@@ -450,11 +540,12 @@ export function getValidatorsFromString(
     > = [];
     ts.forEachChild(
         program.getSourceFile(DEFAULT_FILE_NAME)!,
-        collectDeclarations(config, declarations),
+        collectDeclarations(effectiveConfig, declarations),
     );
 
-    // Create a set of available symbols
+    // Create a set of available symbols and track newtype aliases
     const availableSymbols = new Set<string>();
+    const newtypeAliases = new Map<string, NewtypeInfo>();
     declarations.forEach((node) => {
         let symbol: ts.Symbol | undefined;
         if (node.kind === ts.SyntaxKind.VariableStatement) {
@@ -466,8 +557,27 @@ export function getValidatorsFromString(
         }
         if (symbol?.name) {
             availableSymbols.add(symbol.name);
+
+            // Identify primitive type aliases that should become newtypes
+            if (
+                effectiveConfig.newtypeMode === "all" &&
+                ts.isTypeAliasDeclaration(node)
+            ) {
+                const primitiveType = getPrimitiveAliasType(node, checker);
+                if (primitiveType) {
+                    newtypeAliases.set(symbol.name, {
+                        name: symbol.name,
+                        interfaceName: symbol.name,
+                        primitiveType,
+                    });
+                }
+            }
         }
     });
+
+    const result = effectiveConfig.includeHeader
+        ? [getImports(newtypeAliases)]
+        : [];
 
     // Sort declarations in dependency order
     const sortedDeclarations = topologicalSort(
@@ -485,6 +595,7 @@ export function getValidatorsFromString(
                 checker,
                 processedDeclarations,
                 availableSymbols,
+                newtypeAliases,
             ),
         );
     });
@@ -503,7 +614,6 @@ export function getValidatorsFromFileNames(): string {
     }
     const program = ts.createProgram(config.fileNames, compilerOptions);
     const checker = program.getTypeChecker();
-    const result = config.includeHeader ? [getImports()] : [];
 
     // Collect all declarations
     const declarations: Array<
@@ -518,8 +628,9 @@ export function getValidatorsFromFileNames(): string {
         }
     }
 
-    // Create a set of available symbols
+    // Create a set of available symbols and track newtype aliases
     const availableSymbols = new Set<string>();
+    const newtypeAliases = new Map<string, NewtypeInfo>();
     declarations.forEach((node) => {
         let symbol: ts.Symbol | undefined;
         if (node.kind === ts.SyntaxKind.VariableStatement) {
@@ -531,8 +642,25 @@ export function getValidatorsFromFileNames(): string {
         }
         if (symbol?.name) {
             availableSymbols.add(symbol.name);
+
+            // Identify primitive type aliases that should become newtypes
+            if (
+                config.newtypeMode === "all" &&
+                ts.isTypeAliasDeclaration(node)
+            ) {
+                const primitiveType = getPrimitiveAliasType(node, checker);
+                if (primitiveType) {
+                    newtypeAliases.set(symbol.name, {
+                        name: symbol.name,
+                        interfaceName: symbol.name,
+                        primitiveType,
+                    });
+                }
+            }
         }
     });
+
+    const result = config.includeHeader ? [getImports(newtypeAliases)] : [];
 
     // Sort declarations in dependency order
     const sortedDeclarations = topologicalSort(
@@ -550,9 +678,12 @@ export function getValidatorsFromFileNames(): string {
                 checker,
                 processedDeclarations,
                 availableSymbols,
+                newtypeAliases,
             ),
         );
     });
 
     return result.join("\n\n");
 }
+
+export { defaultConfig, TsToIoConfig };
