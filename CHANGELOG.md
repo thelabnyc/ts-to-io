@@ -1,3 +1,9 @@
+## v0.5.1 (2025-12-10)
+
+### Fix
+
+- allow deduplicating nominal types
+
 ## v0.5.0 (2025-12-10)
 
 ### Feat
