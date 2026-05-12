@@ -40,7 +40,7 @@ export function getCliConfig(): TsToIoConfig {
     return {
         ...program.opts(),
         fileNames: program.args,
-    } as TsToIoConfig;
+    };
 }
 
 /**
