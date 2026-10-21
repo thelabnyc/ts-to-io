@@ -34,9 +34,9 @@
     "@tsconfig/node24": "^24.0.3",
     "@types/node": "^24.0.14",
     "@typescript-eslint/parser": "^8.37.0",
-    "@vitest/ui": "^4.0.0",
+    "@vitest/ui": "^5.0.0",
     "eslint-import-resolver-typescript": "^4.4.4",
-    "vitest": "^4.0.0"
+    "vitest": "^5.0.0"
   },
   "peerDependencies": {
     "io-ts": "^2.2.0",
